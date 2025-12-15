@@ -76,8 +76,27 @@ When presenting film results, highlight the most relevant information and make r
         try:
             if provider == "ollama":
                 new_client = OllamaClient()
-                if model_name:
-                    new_client.model = model_name
+                available_models = new_client.list_models()
+                
+                # Determine model name
+                target_model = model_name or new_client.model
+                
+                # Check availability
+                # Note: Ollama model names can comprise name:tag
+                # We do a loose check or exact check? Exact is better.
+                if available_models and target_model not in available_models:
+                     # If users specific model not found but we have others, suggest or auto-pick?
+                     # If user explicitly asked for 'foo', fail.
+                     # If user just said 'switch ollama' (defaulting to config), and config is missing, auto-pick.
+                    if not model_name: # User didn't specify, we tried default
+                        # Pick first available as fallback
+                        target_model = available_models[0]
+                    else:
+                        # User specified, but it's missing. Return error with list.
+                        return f"Model '{target_model}' not found. Available: {', '.join(available_models)}"
+                
+                new_client.model = target_model
+                
             elif provider == "gemini":
                 new_client = GeminiClient()
                 if model_name:
