@@ -58,6 +58,21 @@ class FilmAgentCLI(cmd.Cmd):
         """Handle default commands (chat messages)."""
         if not line:
             return
+            
+        # Check for command typos
+        commands = ['help', 'quit', 'exit', 'clear', 'switch', 'models']
+        first_word = line.split()[0].lower()
+        
+        # Simple typo check (Levenshtein distance <= 2)
+        for cmd_name in commands:
+            if cmd_name == first_word:
+                continue # exact match should have been handled by do_* methods
+                
+            # If it's close enough (e.g. swithc vs switch)
+            if self._is_typo(first_word, cmd_name):
+                console.print(f"[yellow]Did you mean '{cmd_name}'? Type '{cmd_name}' to run the command.[/yellow]")
+                return
+
         
         try:
             with console.status("[bold green]Thinking...[/bold green]"):
@@ -108,6 +123,30 @@ class FilmAgentCLI(cmd.Cmd):
             title="Current Configuration",
             border_style="green"
         ))
+
+    def _is_typo(self, input_str: str, target: str) -> bool:
+        """Check if input is a typo of target (Levenshtein distance <= 1)."""
+        if abs(len(input_str) - len(target)) > 2:
+            return False
+            
+        # Basic Levenshtein distance implementation
+        if len(input_str) < len(target):
+            return self._is_typo(target, input_str)
+            
+        if len(target) == 0:
+            return len(input_str) <= 2
+            
+        previous_row = range(len(target) + 1)
+        for i, c1 in enumerate(input_str):
+            current_row = [i + 1]
+            for j, c2 in enumerate(target):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+            
+        return previous_row[-1] <= 2
 
 
 def main():
