@@ -61,7 +61,11 @@ class OllamaClient(LLMClient):
             )
         except ollama.ResponseError as e:
             if e.status_code == 400 and "does not support tools" in str(e):
-                # Fallback: model doesn't support tools, run without them
+                # Fallback: model doesn't support tools, request JSON mode
+                # Modify the last user message to include instructions
+                if self.messages and self.messages[-1]['role'] == 'user':
+                    self.messages[-1]['content'] += "\n\nSYSTEM: This model does not support native tools. If you need to search or use a tool, output valid JSON: {\"tool\": \"tool_name\", \"args\": {...}}."
+                
                 response = self.client.chat(
                     model=self.model,
                     messages=self.messages
@@ -122,6 +126,54 @@ class OllamaClient(LLMClient):
                 }
                 for tool_call in message['tool_calls']
             ]
+            
+        # Fallback: Try to parse JSON from content
+        content = message.get('content', '')
+        if content:
+            import json
+            
+            calls = []
+            
+            # 1. Try finding Markdown Code Blocks first (most reliable)
+            import re
+            code_block_pattern = r"```json\s*(\{.*?\})\s*```"
+            matches = re.findall(code_block_pattern, content, re.DOTALL)
+            for match in matches:
+                try:
+                    data = json.loads(match)
+                    if "tool" in data and "args" in data:
+                        calls.append({"name": data["tool"], "args": data["args"]})
+                except:
+                   pass
+            
+            if calls:
+                return calls
+
+            # 2. Robust scanning using JSONDecoder
+            decoder = json.JSONDecoder()
+            pos = 0
+            while pos < len(content):
+                # Find next opening brace
+                next_brace = content.find('{', pos)
+                if next_brace == -1:
+                    break
+                
+                try:
+                    obj, end_idx = decoder.raw_decode(content, next_brace)
+                    pos = end_idx
+                    
+                    if isinstance(obj, dict) and "tool" in obj and "args" in obj:
+                         calls.append({
+                             "name": obj["tool"],
+                             "args": obj["args"]
+                         })
+                except json.JSONDecodeError:
+                    # Move past this brace to continue searching
+                    pos = next_brace + 1
+            
+            if calls:
+                return calls
+
         return []
     
     def get_text_response(self, response: Any) -> Optional[str]:
@@ -159,3 +211,20 @@ class OllamaClient(LLMClient):
             })
             
         self.messages = new_history
+    
+    def list_models(self) -> List[str]:
+        """List available local models."""
+        try:
+            models_info = self.client.list()
+            # Check for object structure (Pydantic/Object)
+            if hasattr(models_info, 'models'):
+                return [m.model for m in models_info.models]
+            
+            # Fallback for dict structure
+            if isinstance(models_info, dict) and 'models' in models_info:
+                # older versions might use 'name' or 'model' key
+                return [m.get('model', m.get('name')) for m in models_info['models']]
+                
+            return []
+        except Exception:
+            return []
